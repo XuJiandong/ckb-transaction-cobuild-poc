@@ -18,9 +18,10 @@
 //! ```
 //! - **`seal`**: Typically represents a signature.
 //! - **`signing_message_hash`**: The hashed message that the owner signed.
-//! Together with the public key hash, these components are verified using
-//! cryptographic algorithms. To activate cobuild, proceed with calling
-//! `cobuild_entry`:
+//! Together with the public key/pubkey hash, these components are verified
+//! using cryptographic algorithms.
+//!
+//! To support cobuild, proceed with calling `cobuild_entry`:
 //! ```rust
 //! let verifier = Verifier::new();
 //! let cobuild_activated = cobuild_entry(&verifier)?;
@@ -109,12 +110,11 @@ fn fetch_seal() -> Result<Vec<u8>, Error> {
     }
 }
 
-///
-/// fetch the message field of SighashAll. Returns None if there is no
-/// SighashAll witness. Returns Error::WrongWitnessLayout if there are more than
-/// one SighashAll witness. This function may be used by type scripts and lock
+/// Retrieves the `message` field from a `SighashAll` witness.
+/// - Returns `None` if a `SighashAll` witness is not present.
+/// - Returns `Error::WrongWitnessLayout` if multiple `SighashAll` witnesses are
+/// found. This function is intended for use within type scripts and lock
 /// scripts.
-///
 pub fn fetch_message() -> Result<Option<schemas2::basic::Message>, Error> {
     let tx = new_transaction();
     let (witness_layouts, _) = parse_witness_layouts(&tx)?;
@@ -208,11 +208,11 @@ fn cobuild_normal_entry<F: Callback>(verifier: F) -> Result<(), Error> {
     Ok(())
 }
 
-///
-/// Parse all witnesses into WitnessLayout structure if possible. It is none if
-/// isn't. For example, if it is a WitnessArgs structure, it is none. The second
-/// value indicates the cobuild is activated or not.
-///
+/// Attempts to parse all witnesses into a `WitnessLayout` structure. Returns
+/// `None` if parsing is not possible. For instance, parsing fails and returns
+/// `None` if the structure is a `WitnessArgs`. The second return value
+/// indicates whether the cobuild feature is activated (`true`) or not
+/// (`false`).
 fn parse_witness_layouts(
     tx: &blockchain::Transaction,
 ) -> Result<(Vec<Option<top_level::WitnessLayout>>, bool), Error> {
@@ -221,20 +221,19 @@ fn parse_witness_layouts(
         .into_iter()
         .map(|w| top_level::WitnessLayout::try_from(w).ok())
         .collect();
+    let mut activated = false;
     for w in &witness_layouts {
         if let Some(w2) = w {
             w2.verify(false)?;
+            activated = true;
         }
     }
-    let activated = witness_layouts.iter().any(|w| w.is_some());
     Ok((witness_layouts, activated))
 }
 
-///
-/// This function is the main entry of lock script with cobuild support. It
-/// works with `Callback` trait. See crate document about how to integrate it in
-/// cobuild.
-///
+/// Serves as the primary entry point for a lock script supporting cobuild.
+/// Operates in conjunction with the `Callback` trait. For integration
+/// instructions into cobuild, refer to the crate documentation.
 pub fn cobuild_entry<F: Callback>(verifier: F) -> Result<bool, Error> {
     let tx = new_transaction();
     let raw_tx = tx.raw()?;
@@ -280,7 +279,7 @@ pub fn cobuild_entry<F: Callback>(verifier: F) -> Result<bool, Error> {
     log!("ie = {}, oe = {}, ce = {}, he = {}", ie, oe, ce, he);
     log!("Otx starts at index {}(inclusive)", i + 1);
     // this index is always pointing to the current processing OTX witness.
-    let mut index = i + 1;
+    let mut index = i;
     for witness_index in i + 1..witness_layouts.len() {
         index = witness_index;
         let witness = witness_layouts.get(witness_index).unwrap();
@@ -350,18 +349,22 @@ pub fn cobuild_entry<F: Callback>(verifier: F) -> Result<bool, Error> {
     } // end of step 6 loop
 
     // step 7
-    // after the loop, the j(`index+1`) points to the first non OTX witness
-    let j = index + 1;
+    // after the loop, the j points to the first non OTX witness or out of bounds
+    let j = if index == (witness_layouts.len() - 1) {
+        witness_layouts.len()
+    } else {
+        index
+    };
     log!("the first non OTX witness is at index {}", j);
-    for index in 0..witness_layouts.len() {
+    for loop_index in 0..witness_layouts.len() {
         // [0, i) [j, +infinity)
-        if index < i || index >= j {
-            if let Some(r) = &witness_layouts.get(index) {
+        if loop_index < i || loop_index >= j {
+            if let Some(r) = &witness_layouts.get(loop_index) {
                 match r {
                     Some(schemas2::top_level::WitnessLayout::Otx(_)) => {
                         log!(
                             "WrongWitnessLayout at index = {} (i = {}, j = {}, otx_count = {})",
-                            index,
+                            loop_index,
                             i,
                             j,
                             otx_count

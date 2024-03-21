@@ -1,3 +1,39 @@
+//! # CKB Transaction Cobuild Helper Library
+//! This library is designed to assist developers in integrating cobuild support
+//! into their scripts with ease.
+//!
+//! ### For Lock Script
+//! Begin by implementing the `Callback` trait for your verifier:
+//! ```
+//! impl Callback for Verifier {
+//!     fn invoke(
+//!         &self,
+//!         seal: &[u8],
+//!         signing_message_hash: &[u8; 32],
+//!     ) -> Result<(), ckb_transaction_cobuild::error::Error> {
+//!         // Insert your authentication logic here
+//!         Ok(())
+//!     }
+//! }
+//! ```
+//! - **`seal`**: Typically represents a signature.
+//! - **`signing_message_hash`**: The hashed message that the owner signed.
+//! Together with the public key hash, these components are verified using
+//! cryptographic algorithms. To activate cobuild, proceed with calling
+//! `cobuild_entry`:
+//! ```rust
+//! let verifier = Verifier::new();
+//! let cobuild_activated = cobuild_entry(&verifier)?;
+//! ```
+//! The boolean `cobuild_activated` denotes whether cobuild mode has been
+//! enabled. If not, the script may default to executing its legacy code.
+//!
+//! ### For Type Script
+//! To retrieve messages, use the `fetch_message` function. For comprehensive
+//! details on utilizing messages and actions within the cobuild framework,
+//! refer to the cobuild specification.
+//!
+
 #![no_std]
 extern crate alloc;
 pub mod blake2b;
@@ -17,25 +53,26 @@ use ckb_std::{
     },
     syscalls,
 };
-use error::Error;
-use lazy_reader::{new_transaction, new_witness};
-use schemas2::basic::Message;
-pub use schemas2::{basic, blockchain, top_level};
-
 use core::convert::Into;
+use lazy_reader::{new_input_cell_data, new_transaction, new_witness};
 use molecule::lazy_reader::Cursor;
+use schemas2::basic::Message;
 
-use crate::lazy_reader::new_input_cell_data;
+pub use error::Error;
+pub use schemas2::{basic, blockchain, top_level};
 
 ///
 /// This is the callback trait should be implemented in lock script by
 /// developers.
+///
+/// - **`seal`**: Typically represents a signature.
+/// - **`signing_message_hash`**: The hashed message that the owner signed.
 pub trait Callback {
     fn invoke(&self, seal: &[u8], signing_message_hash: &[u8; 32]) -> Result<(), Error>;
 }
 
 ///
-/// All script_hash in `Message.Action` should be in the following set:
+/// All script_hash in `Message.Action` should be in one of the following sets:
 /// 1. all type script hashes in input cells
 /// 2. all type script hashes in output cells
 /// 3. all lock script hashes in input cells
@@ -73,14 +110,14 @@ fn fetch_seal() -> Result<Vec<u8>, Error> {
 }
 
 ///
-/// fetch the message field of SighashAll
-/// returns None if there is no SighashAll witness
-/// returns Error::WrongWitnessLayout if there are more than one SighashAll witness
-/// This function may be used by type scripts and lock scripts.
+/// fetch the message field of SighashAll. Returns None if there is no
+/// SighashAll witness. Returns Error::WrongWitnessLayout if there are more than
+/// one SighashAll witness. This function may be used by type scripts and lock
+/// scripts.
 ///
 pub fn fetch_message() -> Result<Option<schemas2::basic::Message>, Error> {
     let tx = new_transaction();
-    let (witness_layouts, _) = parse_witness_layouts(&tx);
+    let (witness_layouts, _) = parse_witness_layouts(&tx)?;
 
     let mut iter = witness_layouts.iter().filter_map(|witness| match witness {
         Some(top_level::WitnessLayout::SighashAll(m)) => Some(m.message().unwrap().clone()),
@@ -117,6 +154,9 @@ fn check_others_in_group() -> Result<(), Error> {
     Ok(())
 }
 
+///
+/// Generate signing message hash for SighashAll or SighashAllOnly.
+///
 fn generate_signing_message_hash(message: &Option<Message>) -> Result<[u8; 32], Error> {
     let tx = new_transaction();
 
@@ -159,7 +199,7 @@ fn generate_signing_message_hash(message: &Option<Message>) -> Result<[u8; 32], 
     Ok(result)
 }
 
-pub fn cobuild_normal_entry<F: Callback>(verifier: F) -> Result<(), Error> {
+fn cobuild_normal_entry<F: Callback>(verifier: F) -> Result<(), Error> {
     check_others_in_group()?;
     let message = fetch_message()?;
     let signing_message_hash = generate_signing_message_hash(&message)?;
@@ -169,36 +209,36 @@ pub fn cobuild_normal_entry<F: Callback>(verifier: F) -> Result<(), Error> {
 }
 
 ///
-/// Parse all witness into WitnessLayout structure if possible. It is none if
+/// Parse all witnesses into WitnessLayout structure if possible. It is none if
 /// isn't. For example, if it is a WitnessArgs structure, it is none. The second
 /// value indicates the cobuild is activated or not.
 ///
-pub fn parse_witness_layouts(
+fn parse_witness_layouts(
     tx: &blockchain::Transaction,
-) -> (Vec<Option<top_level::WitnessLayout>>, bool) {
+) -> Result<(Vec<Option<top_level::WitnessLayout>>, bool), Error> {
     let witness_layouts: Vec<Option<top_level::WitnessLayout>> = tx
-        .witnesses()
-        .unwrap()
+        .witnesses()?
         .into_iter()
         .map(|w| top_level::WitnessLayout::try_from(w).ok())
         .collect();
     for w in &witness_layouts {
         if let Some(w2) = w {
-            w2.verify(false).unwrap();
+            w2.verify(false)?;
         }
     }
     let activated = witness_layouts.iter().any(|w| w.is_some());
-    (witness_layouts, activated)
+    Ok((witness_layouts, activated))
 }
 
 ///
-/// verify all otx messages with the given script hash and verify function
-/// This function is mainly used by lock script
+/// This function is the main entry of lock script with cobuild support. It
+/// works with `Callback` trait. See crate document about how to integrate it in
+/// cobuild.
 ///
 pub fn cobuild_entry<F: Callback>(verifier: F) -> Result<bool, Error> {
     let tx = new_transaction();
     let raw_tx = tx.raw()?;
-    let (witness_layouts, cobuild_activated) = parse_witness_layouts(&tx);
+    let (witness_layouts, cobuild_activated) = parse_witness_layouts(&tx)?;
     // Legacy Flow Handling
     if !cobuild_activated {
         return Ok(false);
@@ -216,10 +256,10 @@ pub fn cobuild_entry<F: Callback>(verifier: F) -> Result<bool, Error> {
     }
     let otx_start = otx_start.unwrap();
 
-    let start_input_cell: u32 = otx_start.start_input_cell().unwrap();
-    let start_output_cell: u32 = otx_start.start_output_cell().unwrap();
-    let start_cell_deps: u32 = otx_start.start_cell_deps().unwrap();
-    let start_header_deps: u32 = otx_start.start_header_deps().unwrap();
+    let start_input_cell: u32 = otx_start.start_input_cell()?;
+    let start_output_cell: u32 = otx_start.start_output_cell()?;
+    let start_cell_deps: u32 = otx_start.start_cell_deps()?;
+    let start_header_deps: u32 = otx_start.start_header_deps()?;
     // abbrev. from spec:
     // ie = input end
     // is = input start
@@ -308,8 +348,9 @@ pub fn cobuild_entry<F: Callback>(verifier: F) -> Result<bool, Error> {
             }
         }
     } // end of step 6 loop
-      // step 7
-      // after the loop, the j(`index+1`) points to the first non OTX witness
+
+    // step 7
+    // after the loop, the j(`index+1`) points to the first non OTX witness
     let j = index + 1;
     log!("the first non OTX witness is at index {}", j);
     for index in 0..witness_layouts.len() {
@@ -428,6 +469,9 @@ fn generate_otx_smh(
     Ok(result)
 }
 
+///
+/// parse all witnesses and find out the `OtxStart`
+///
 fn fetch_otx_start(
     witnesses: &Vec<Option<top_level::WitnessLayout>>,
 ) -> Result<(Option<basic::OtxStart>, usize), Error> {

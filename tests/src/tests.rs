@@ -151,8 +151,8 @@ fn test_success_otx() {
             .lock(lock_script.clone())
             .build(),
     ];
-
-    let outputs_data = vec![Bytes::new(); 2];
+    let data : Bytes = vec![0u8; 5000].into();
+    let outputs_data = vec![data, Bytes::new()];
 
     // build transaction
     let tx = TransactionBuilder::default()

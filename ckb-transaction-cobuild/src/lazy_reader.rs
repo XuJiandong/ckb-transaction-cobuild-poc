@@ -22,7 +22,13 @@ fn read_data<F: Fn(&mut [u8], usize) -> Result<usize, SysError>>(
     if (offset + min_len) > total_size {
         return Err(Error::OutOfBound(offset + min_len, total_size));
     }
-    let actual_len = load_func(buf, offset).map_err(|_| Error::Common)?;
+    let actual_len = match load_func(buf, offset) {
+        Ok(l) => l,
+        Err(err) => match err {
+            SysError::LengthNotEnough(l) => l,
+            _ => return Err(Error::OutOfBound(0, 0)),
+        },
+    };
     let read_len = min(buf.len(), actual_len);
     log!("totally read {} bytes", read_len);
     Ok(read_len)
@@ -30,8 +36,7 @@ fn read_data<F: Fn(&mut [u8], usize) -> Result<usize, SysError>>(
 
 fn read_size<F: Fn(&mut [u8]) -> Result<usize, SysError>>(load_func: F) -> Result<usize, Error> {
     let mut buf = [0u8; 4];
-    let result = load_func(&mut buf);
-    match result {
+    match load_func(&mut buf) {
         Ok(l) => Ok(l),
         Err(e) => match e {
             SysError::LengthNotEnough(l) => Ok(l),

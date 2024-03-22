@@ -372,8 +372,12 @@ fn generate_otx_a0(dl: &mut Resource, px: &mut Pickaxer) -> ckb_types::core::Tra
     let cell_meta_omni_lock = px.insert_cell_data(dl, &BINARY_TRANSACTION_COBUILD_LOCK_DEMO);
     let cell_meta_auth = px.insert_cell_data(dl, &BINARY_AUTH);
     let cell_meta_secp256k1_data = px.insert_cell_data(dl, &BINARY_SECP256K1_DATA);
-    let cell_meta_i =
-        px.insert_cell_fund(dl, px.create_script(&cell_meta_omni_lock, &args), None, &[]);
+    let cell_meta_i = px.insert_cell_fund(
+        dl,
+        px.create_script(&cell_meta_omni_lock, &args),
+        None,
+        &[0u8; 3000],
+    );
 
     // Create cell dep
     let tx_builder = tx_builder.cell_dep(px.create_cell_dep(&cell_meta_always_success));
@@ -394,7 +398,7 @@ fn generate_otx_a0(dl: &mut Resource, px: &mut Pickaxer) -> ckb_types::core::Tra
     ));
 
     // Create output data
-    let tx_builder = tx_builder.output_data(Vec::new().pack());
+    let tx_builder = tx_builder.output_data(vec![0u8; 3000].pack());
 
     // Create witness
     let msgs = {
@@ -456,8 +460,12 @@ fn generate_otx_b0(dl: &mut Resource, px: &mut Pickaxer) -> ckb_types::core::Tra
     let cell_meta_omni_lock = px.insert_cell_data(dl, &BINARY_TRANSACTION_COBUILD_LOCK_DEMO);
     let cell_meta_auth = px.insert_cell_data(dl, &BINARY_AUTH);
     let cell_meta_secp256k1_data = px.insert_cell_data(dl, &BINARY_SECP256K1_DATA);
-    let cell_meta_i =
-        px.insert_cell_fund(dl, px.create_script(&cell_meta_omni_lock, &args), None, &[]);
+    let cell_meta_i = px.insert_cell_fund(
+        dl,
+        px.create_script(&cell_meta_omni_lock, &args),
+        None,
+        &[0u8; 1024],
+    );
 
     // Create cell dep
     let tx_builder = tx_builder.cell_dep(px.create_cell_dep(&cell_meta_always_success));
@@ -479,7 +487,7 @@ fn generate_otx_b0(dl: &mut Resource, px: &mut Pickaxer) -> ckb_types::core::Tra
     ));
 
     // Create output data
-    let tx_builder = tx_builder.output_data(Vec::new().pack());
+    let tx_builder = tx_builder.output_data(vec![0u8; 1024].pack());
 
     // Create witness
     let msgs = {
@@ -541,8 +549,12 @@ fn generate_otx_c0(dl: &mut Resource, px: &mut Pickaxer) -> ckb_types::core::Tra
     let cell_meta_omni_lock = px.insert_cell_data(dl, &BINARY_TRANSACTION_COBUILD_LOCK_DEMO);
     let cell_meta_auth = px.insert_cell_data(dl, &BINARY_AUTH);
     let cell_meta_secp256k1_data = px.insert_cell_data(dl, &BINARY_SECP256K1_DATA);
-    let cell_meta_i =
-        px.insert_cell_fund(dl, px.create_script(&cell_meta_omni_lock, &args), None, &[]);
+    let cell_meta_i = px.insert_cell_fund(
+        dl,
+        px.create_script(&cell_meta_omni_lock, &args),
+        None,
+        &[0u8; 4100],
+    );
 
     // Create cell dep
     let tx_builder: ckb_types::core::TransactionBuilder =
@@ -562,7 +574,7 @@ fn generate_otx_c0(dl: &mut Resource, px: &mut Pickaxer) -> ckb_types::core::Tra
     ));
 
     // Create output data
-    let tx_builder = tx_builder.output_data(Vec::new().pack());
+    let tx_builder = tx_builder.output_data(vec![0u8; 4096].pack());
 
     // Create witness
     let msgs = {
@@ -1226,7 +1238,10 @@ fn test_cobuild_otx_prefix_and_suffix() {
 fn test_cobuild_otx_same_lock_script() {
     let mut dl = Resource::default();
     let mut px = Pickaxer::default();
-    let tx = assemble_otx(vec![generate_otx_a0(&mut dl, &mut px), generate_otx_a0(&mut dl, &mut px)]);
+    let tx = assemble_otx(vec![
+        generate_otx_a0(&mut dl, &mut px),
+        generate_otx_a0(&mut dl, &mut px),
+    ]);
     let tx = ckb_types::core::cell::resolve_transaction(tx, &mut HashSet::new(), &dl, &dl).unwrap();
     let verifier = Verifier::default();
     verifier.verify(&tx, &dl).unwrap();

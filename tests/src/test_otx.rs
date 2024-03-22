@@ -695,6 +695,94 @@ fn generate_otx_d0(dl: &mut Resource, px: &mut Pickaxer) -> ckb_types::core::Tra
     tx_builder.build()
 }
 
+// Big message
+fn generate_otx_e0(dl: &mut Resource, px: &mut Pickaxer) -> ckb_types::core::TransactionView {
+    let tx_builder = ckb_types::core::TransactionBuilder::default();
+
+    // Create prior knowledge
+    let prikey = "0000000000000000000000000000000000000000000000000000000000000004";
+    let (prikey, args) = get_ckb_key(prikey);
+
+    // Create cell meta
+    let cell_meta_always_success = px.insert_cell_data(dl, &BINARY_ALWAYS_SUCCESS);
+    let cell_meta_omni_lock = px.insert_cell_data(dl, &BINARY_TRANSACTION_COBUILD_LOCK_DEMO);
+    let cell_meta_auth = px.insert_cell_data(dl, &BINARY_AUTH);
+    let cell_meta_secp256k1_data = px.insert_cell_data(dl, &BINARY_SECP256K1_DATA);
+    let cell_meta_i =
+        px.insert_cell_fund(dl, px.create_script(&cell_meta_omni_lock, &args), None, &[]);
+
+    // Create cell dep
+    let tx_builder: ckb_types::core::TransactionBuilder =
+        tx_builder.cell_dep(px.create_cell_dep(&cell_meta_always_success));
+    let tx_builder: ckb_types::core::TransactionBuilder =
+        tx_builder.cell_dep(px.create_cell_dep(&cell_meta_auth));
+    let tx_builder = tx_builder.cell_dep(px.create_cell_dep(&cell_meta_secp256k1_data));
+    let tx_builder = tx_builder.cell_dep(px.create_cell_dep(&cell_meta_omni_lock));
+
+    // Create input
+    let tx_builder = tx_builder.input(px.create_cell_input(&cell_meta_i));
+
+    // Create output
+    let tx_builder = tx_builder.output(px.create_cell_output(
+        px.create_script(&cell_meta_always_success, &[]),
+        Some(px.create_script(&cell_meta_always_success, &[])),
+    ));
+
+    // Create output data
+    let tx_builder = tx_builder.output_data(Vec::new().pack());
+
+    // Create witness
+    let msgs = {
+        let mut action_vec = Vec::<schemas::basic::Action>::new();
+        for _ in 0..3072 {
+            let action = schemas::basic::Action::new_builder()
+                .script_info_hash(ckb_types::packed::Byte32::from_slice(&[0x00; 32]).unwrap())
+                .script_hash(
+                    px.create_script(&cell_meta_always_success, &[])
+                        .calc_script_hash(),
+                )
+                .data(ckb_types::bytes::Bytes::from(vec![0x42; 128]).pack())
+                .build();
+            action_vec.push(action);
+        }
+        let action_vec = schemas::basic::ActionVec::new_builder()
+            .extend(action_vec)
+            .build();
+        let msgs = schemas::basic::Message::new_builder()
+            .actions(action_vec)
+            .build();
+        msgs
+    };
+    let sign_msg = cobuild_create_signing_message_hash_otx(tx_builder.clone().build(), &dl, &msgs);
+    println_hex("smh", &sign_msg);
+    let seal = sign_pubkey_hash(prikey, &sign_msg);
+    println_hex("seal", seal.as_slice());
+    let seal = schemas::basic::SealPair::new_builder()
+        .script_hash(
+            px.create_script(&cell_meta_omni_lock, &args)
+                .calc_script_hash(),
+        )
+        .seal(seal.pack())
+        .build();
+    let seal = schemas::basic::SealPairVec::new_builder()
+        .push(seal)
+        .build();
+    let ox = schemas::basic::Otx::new_builder()
+        .seals(seal)
+        .message(msgs)
+        .input_cells(1u32.pack())
+        .output_cells(1u32.pack())
+        .cell_deps(4u32.pack())
+        .header_deps(0u32.pack())
+        .build();
+    let wl = schemas::top_level::WitnessLayout::new_builder()
+        .set(ox)
+        .build();
+    let tx_builder = tx_builder.witness(wl.as_bytes().pack());
+
+    tx_builder.build()
+}
+
 // Failed: No seal
 fn generate_otx_a1_fail(dl: &mut Resource, px: &mut Pickaxer) -> ckb_types::core::TransactionView {
     let tx = generate_otx_a0(dl, px);
@@ -1321,4 +1409,15 @@ fn test_cobuild_otx_double_input() {
     let tx = ckb_types::core::cell::resolve_transaction(tx, &mut HashSet::new(), &dl, &dl).unwrap();
     let verifier = Verifier::default();
     verifier.verify(&tx, &dl).unwrap_err();
+}
+
+#[test]
+fn test_cobuild_big_message() {
+    let mut dl = Resource::default();
+    let mut px = Pickaxer::default();
+    let tx = assemble_otx(vec![generate_otx_e0(&mut dl, &mut px)]);
+    let tx = ckb_types::core::cell::resolve_transaction(tx, &mut HashSet::new(), &dl, &dl).unwrap();
+
+    let verifier = Verifier::default();
+    verifier.verify(&tx, &dl).unwrap();
 }

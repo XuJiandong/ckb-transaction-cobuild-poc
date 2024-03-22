@@ -1223,6 +1223,16 @@ fn test_cobuild_otx_prefix_and_suffix() {
 }
 
 #[test]
+fn test_cobuild_otx_same_lock_script() {
+    let mut dl = Resource::default();
+    let mut px = Pickaxer::default();
+    let tx = assemble_otx(vec![generate_otx_a0(&mut dl, &mut px), generate_otx_a0(&mut dl, &mut px)]);
+    let tx = ckb_types::core::cell::resolve_transaction(tx, &mut HashSet::new(), &dl, &dl).unwrap();
+    let verifier = Verifier::default();
+    verifier.verify(&tx, &dl).unwrap();
+}
+
+#[test]
 fn test_cobuild_otx_random() {
     type Fntype = dyn Fn(&mut Resource, &mut Pickaxer) -> ckb_types::core::TransactionView;
     let mut rgen = rand::prelude::thread_rng();
